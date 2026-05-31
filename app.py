@@ -58,10 +58,17 @@ async def http_exception_handler(request, exc):
     return PlainTextResponse(str(exc.detail), status_code=exc.status_code)
 
 def redir(url, msg="", error=""):
-    q={}
-    if msg: q["msg"]=msg
-    if error: q["error"]=error
-    return RedirectResponse(url + ("?"+urlencode(q) if q else ""), status_code=303)
+    q = {}
+    if msg:
+        q["msg"] = msg
+    if error:
+        q["error"] = error
+
+    if not q:
+        return RedirectResponse(url, status_code=303)
+
+    separator = "&" if "?" in url else "?"
+    return RedirectResponse(url + separator + urlencode(q), status_code=303)
 
 @app.get("/")
 def home(request: Request): return RedirectResponse("/admin" if is_logged_in(request) else "/login", status_code=303)
@@ -211,18 +218,35 @@ def del_group(group_id:int=Form(...), _: bool=Depends(require_admin)):
     finally: db.close()
 
 @app.get("/admin/students", response_class=HTMLResponse)
-@app.get("/admin/students", response_class=HTMLResponse)
-def students(request: Request, msg: str="", error: str="", last_group_id: int=0, _: bool=Depends(require_admin)):
-    db=SessionLocal()
+def students(
+    request: Request,
+    msg: str = "",
+    error: str = "",
+    last_group_id: int = 0,
+    filter_group_id: int = 0,
+    _: bool = Depends(require_admin)
+):
+    db = SessionLocal()
     try:
-        edit=request.query_params.get("edit")
-        edit_item=db.query(Student).filter_by(id=int(edit)).first() if edit and edit.isdigit() else None
+        edit = request.query_params.get("edit")
+        edit_item = db.query(Student).filter_by(id=int(edit)).first() if edit and edit.isdigit() else None
+
+        groups = db.query(Group).join(Direction).order_by(Direction.name, Group.name).all()
+
+        query = db.query(Student).join(Group).join(Direction)
+
+        if filter_group_id:
+            query = query.filter(Student.group_id == filter_group_id)
+
+        items = query.order_by(Direction.name, Group.name, Student.full_name).all()
+
         return templates.TemplateResponse("students.html", {
             "request": request,
-            "items": db.query(Student).join(Group).join(Direction).order_by(Direction.name, Group.name, Student.full_name).all(),
-            "groups": db.query(Group).join(Direction).order_by(Direction.name, Group.name).all(),
+            "items": items,
+            "groups": groups,
             "edit_item": edit_item,
             "last_group_id": last_group_id,
+            "filter_group_id": filter_group_id,
             "msg": msg,
             "error": error,
             "active": "students"
@@ -232,14 +256,23 @@ def students(request: Request, msg: str="", error: str="", last_group_id: int=0,
 
 @app.post("/admin/students")
 @app.post("/admin/students")
-def add_student(full_name:str=Form(...), group_id:int=Form(...), _: bool=Depends(require_admin)):
-    db=SessionLocal()
+def add_student(full_name: str = Form(...), group_id: int = Form(...), _: bool = Depends(require_admin)):
+    db = SessionLocal()
     try:
-        if not db.query(Student).filter_by(full_name=full_name.strip(), group_id=group_id).first():
-            db.add(Student(full_name=full_name.strip(), group_id=group_id))
+        full_name = full_name.strip()
+
+        if not db.query(Student).filter_by(full_name=full_name, group_id=group_id).first():
+            db.add(Student(full_name=full_name, group_id=group_id))
             db.commit()
-            return redir(f"/admin/students?last_group_id={group_id}", msg="O'quvchi saqlandi.")
-        return redir(f"/admin/students?last_group_id={group_id}", error="Bu o'quvchi shu guruhda mavjud.")
+            return redir(
+                f"/admin/students?last_group_id={group_id}&filter_group_id={group_id}",
+                msg="O'quvchi saqlandi."
+            )
+
+        return redir(
+            f"/admin/students?last_group_id={group_id}&filter_group_id={group_id}",
+            error="Bu o'quvchi shu guruhda mavjud."
+        )
     finally:
         db.close()
 
