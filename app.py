@@ -211,22 +211,37 @@ def del_group(group_id:int=Form(...), _: bool=Depends(require_admin)):
     finally: db.close()
 
 @app.get("/admin/students", response_class=HTMLResponse)
-def students(request: Request, msg: str="", error: str="", _: bool=Depends(require_admin)):
+@app.get("/admin/students", response_class=HTMLResponse)
+def students(request: Request, msg: str="", error: str="", last_group_id: int=0, _: bool=Depends(require_admin)):
     db=SessionLocal()
     try:
         edit=request.query_params.get("edit")
         edit_item=db.query(Student).filter_by(id=int(edit)).first() if edit and edit.isdigit() else None
-        return templates.TemplateResponse("students.html", {"request":request,"items":db.query(Student).join(Group).join(Direction).order_by(Direction.name,Group.name,Student.full_name).all(),"groups":db.query(Group).join(Direction).order_by(Direction.name,Group.name).all(),"edit_item":edit_item,"msg":msg,"error":error,"active":"students"})
-    finally: db.close()
+        return templates.TemplateResponse("students.html", {
+            "request": request,
+            "items": db.query(Student).join(Group).join(Direction).order_by(Direction.name, Group.name, Student.full_name).all(),
+            "groups": db.query(Group).join(Direction).order_by(Direction.name, Group.name).all(),
+            "edit_item": edit_item,
+            "last_group_id": last_group_id,
+            "msg": msg,
+            "error": error,
+            "active": "students"
+        })
+    finally:
+        db.close()
 
+@app.post("/admin/students")
 @app.post("/admin/students")
 def add_student(full_name:str=Form(...), group_id:int=Form(...), _: bool=Depends(require_admin)):
     db=SessionLocal()
     try:
         if not db.query(Student).filter_by(full_name=full_name.strip(), group_id=group_id).first():
-            db.add(Student(full_name=full_name.strip(), group_id=group_id)); db.commit()
-        return redir("/admin/students", msg="O'quvchi saqlandi.")
-    finally: db.close()
+            db.add(Student(full_name=full_name.strip(), group_id=group_id))
+            db.commit()
+            return redir(f"/admin/students?last_group_id={group_id}", msg="O'quvchi saqlandi.")
+        return redir(f"/admin/students?last_group_id={group_id}", error="Bu o'quvchi shu guruhda mavjud.")
+    finally:
+        db.close()
 
 @app.post("/admin/students/update")
 def upd_student(student_id:int=Form(...), full_name:str=Form(...), group_id:int=Form(...), is_active:str=Form(None), reset_telegram:str=Form(None), _: bool=Depends(require_admin)):
